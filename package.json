@@ -1,10 +1,9 @@
 {
-  "name": "tiktok-repost-watcher-free",
+  "name": "m",
   "version": "1.0.0",
-  "description": "Fully free TikTok repost watcher using a headless browser and a dummy account's saved login session instead of a paid scraping service.",
+  "description": "",
   "scripts": {
-    "login": "node login-once.js",
-    "check": "node check-repost.js"
+    "start": "node check-repost.js"
   },
   "dependencies": {
     "axios": "^1.7.7",
