@@ -3,3 +3,5 @@ node_modules/
 auth-state.json
 cookies.json
 debug-profile.png
+AUTH_STATE_B64.txt
+*.txt
