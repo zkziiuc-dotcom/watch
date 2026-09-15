@@ -15,12 +15,18 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      TARGET: ${{ github.event.inputs.username_override || secrets.TIKTOK_USERNAME }}
+      TIKTOK_USERNAME: ${{ github.event.inputs.username_override || secrets.TIKTOK_USERNAME }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      DISPLAY: ':99'
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: xvfb
         run: sudo apt-get install -y xvfb
@@ -38,13 +44,8 @@ jobs:
 
       - run: |
           Xvfb :99 -screen 0 1280x800x24 &
-          sleep 1
+          sleep 3
           node check-repost.js
-        env:
-          TARGET: ${{ github.event.inputs.username_override || secrets.TIKTOK_USERNAME }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DISPLAY: ':99'
 
       - run: |
           git config user.name "bot"
@@ -55,4 +56,3 @@ jobs:
 
       - run: rm -f auth-state.json
         if: always()
-
