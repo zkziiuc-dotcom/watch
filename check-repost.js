@@ -2,51 +2,29 @@ require('dotenv').config();
 const { chromium } = require('playwright-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 chromium.use(StealthPlugin());
-const fs = require('fs');
-const path = require('path');
+const fs    = require('fs');
+const path  = require('path');
 const axios = require('axios');
 
-const USERNAME = process.env.TIKTOK_USERNAME || process.argv[2];
+const USERNAME           = process.env.TARGET || process.env.TIKTOK_USERNAME || process.argv[2];
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const DRY_RUN = process.argv.includes('--dry-run');
+const TELEGRAM_CHAT_ID   = process.env.TELEGRAM_CHAT_ID;
+const DRY_RUN            = process.argv.includes('--dry-run');
+const STATE_FILE         = path.join(__dirname, 'state.json');
+const AUTH_STATE_FILE    = path.join(__dirname, 'auth-state.json');
 
-const STATE_FILE = path.join(__dirname, 'state.json');
-const AUTH_STATE_FILE = path.join(__dirname, 'auth-state.json');
+if (!USERNAME) { console.error('Set TARGET env var or pass username as argument.'); process.exit(1); }
 
-if (!USERNAME) {
-  console.error('Usage: TIKTOK_USERNAME=<username> node check-repost.js   (or pass username as first argument)');
-  process.exit(1);
-}
+function loadState()      { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return { lastId: null }; } }
+function saveState(s)     { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); }
 
-function loadState() {
-  try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-  } catch {
-    return { lastRepostId: null };
-  }
-}
-
-function saveState(state) {
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-}
-
-async function sendTelegram(message) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-    throw new Error('TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing');
-  }
+async function notify(msg) {
   await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    chat_id: TELEGRAM_CHAT_ID,
-    text: message,
-    parse_mode: 'HTML',
+    chat_id: TELEGRAM_CHAT_ID, text: msg, parse_mode: 'HTML',
   });
 }
 
-async function getLatestRepost(username) {
-  if (!fs.existsSync(AUTH_STATE_FILE)) {
-    throw new Error('auth-state.json not found - run "node login-once.js" first.');
-  }
-
+async function scrape(username) {
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext({
     storageState: AUTH_STATE_FILE,
@@ -54,115 +32,74 @@ async function getLatestRepost(username) {
     viewport: { width: 1280, height: 800 },
   });
   const page = await context.newPage();
-
   try {
     await page.goto(`https://www.tiktok.com/@${username}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(4000); // let profile tabs fully render
-
-    // Click the Reposts tab on the profile page.
-    // TikTok uses [class*="PRepost"] for the Reposts tab button, and
-    // [class*="DivVideoFeedTab"] for the profile tab bar (Videos / Reposts / Liked).
-    // We try the most specific selector first, then fall back to a text match inside the tab bar.
-    const selectors = [
-      page.locator('[class*="PRepost"]').first(),
-      page.locator('[class*="DivVideoFeedTab"]').getByText(/^reposts?$/i).first(),
-    ];
+    await page.waitForTimeout(4000);
 
     let clicked = false;
-    for (const sel of selectors) {
-      if ((await sel.count()) > 0) {
-        await sel.click();
-        await page.waitForTimeout(4000); // let repost feed load
-        clicked = true;
-        break;
-      }
+    for (const sel of [
+      page.locator('[class*="PRepost"]').first(),
+      page.locator('[class*="DivVideoFeedTab"]').getByText(/^reposts?$/i).first(),
+    ]) {
+      if ((await sel.count()) > 0) { await sel.click(); await page.waitForTimeout(4000); clicked = true; break; }
     }
+    if (!clicked) return [];
 
-    if (!clicked) {
-      console.log(`  No Reposts tab found on @${username}'s profile — account may have 0 reposts.`);
-      return null;
-    }
-
-    // Wait for video links in the repost feed
     await page.waitForSelector('a[href*="/video/"]', { timeout: 15000 });
 
-    // Repost feed links point to the ORIGINAL creator's video: /@creator/video/ID
-    const href = await page.locator('a[href*="/video/"]').first().getAttribute('href');
-    const match = href && href.match(/@([^/?]+)\/video\/(\d+)/);
-    if (!match) return null;
-
-    const originalCreator = match[1];
-    const videoId = match[2];
-    const videoUrl = `https://www.tiktok.com/@${originalCreator}/video/${videoId}`;
-
-    // Try to grab caption text — best effort, silent fail if not found
-    let caption = null;
-    try {
-      const descEl = page.locator('[class*="DivDesc"] span, [class*="desc"] span, [data-e2e*="desc"]').first();
-      if ((await descEl.count()) > 0) {
-        const text = (await descEl.textContent({ timeout: 2000 })).trim();
-        if (text.length > 0) caption = text.slice(0, 120);
-      }
-    } catch { /* caption stays null */ }
-
-    return { videoId, originalCreator, videoUrl, caption };
+    const seen = new Set(), items = [];
+    for (const el of await page.locator('a[href*="/video/"]').all()) {
+      const href = await el.getAttribute('href');
+      const m = href && href.match(/@([^/?]+)\/video\/(\d+)/);
+      if (!m || seen.has(m[2])) continue;
+      seen.add(m[2]);
+      items.push({ id: m[2], creator: m[1], url: `https://www.tiktok.com/@${m[1]}/video/${m[2]}` });
+    }
+    return items;
   } finally {
     await browser.close();
   }
 }
 
-
-
 async function main() {
-  const timestamp = new Date().toISOString();
+  const ts = new Date().toISOString();
   try {
-    const repost = await getLatestRepost(USERNAME);
-
-    if (!repost) {
-      console.log(`[${timestamp}] Could not find any repost/video on @${USERNAME}'s reposts tab.`);
-      return;
-    }
-
-    const { videoId, originalCreator, videoUrl, caption } = repost;
+    const items = await scrape(USERNAME);
+    if (items.length === 0) { console.log(`[${ts}] nothing found`); return; }
 
     if (DRY_RUN) {
-      console.log(`[${timestamp}] (dry run) Latest repost found:`);
-      console.log(`  Video ID:         ${videoId}`);
-      console.log(`  Original creator: @${originalCreator}`);
-      console.log(`  URL:              ${videoUrl}`);
-      console.log(`  Caption:          ${caption || '(not found)'}`);
+      console.log(`[${ts}] dry-run � ${items.length} item(s):`);
+      items.forEach((r, i) => console.log(`  ${i + 1}. @${r.creator}  ${r.url}`));
       return;
     }
 
     const state = loadState();
-
-    if (state.lastRepostId === null) {
-      state.lastRepostId = videoId;
+    if (state.lastId === null) {
+      state.lastId = items[0].id;
       saveState(state);
-      console.log(`[${timestamp}] Initialized. Watching @${USERNAME} — will notify on the next new repost.`);
-      console.log(`  Current latest: @${originalCreator}/video/${videoId}`);
+      console.log(`[${ts}] initialized`);
       return;
     }
 
-    if (videoId !== state.lastRepostId) {
-      console.log(`[${timestamp}] New repost detected for @${USERNAME}!`);
+    const knownIdx = items.findIndex(r => r.id === state.lastId);
+    const fresh    = knownIdx === -1 ? [items[0]] : items.slice(0, knownIdx);
+    if (fresh.length === 0) { console.log(`[${ts}] no change`); return; }
 
-      const lines = [
-        `🔁 <b>@${USERNAME}</b> just reposted!`,
-        ``,
-        `👤 Original by: <b>@${originalCreator}</b>`,
-        `🔗 ${videoUrl}`,
-      ];
-      if (caption) lines.push(``, `📝 ${caption}`);
+    console.log(`[${ts}] ${fresh.length} new item(s)`);
+    const n = fresh.length;
+    const lines = [`<b>@${USERNAME}</b> reposted ${n} video${n > 1 ? 's' : ''}! ??`, ''];
+    fresh.forEach((r, i) => {
+      if (n > 1) lines.push(`<b>${i + 1}.</b>`);
+      lines.push(`?? <b>@${r.creator}</b>`);
+      lines.push(`?? ${r.url}`);
+      if (i < fresh.length - 1) lines.push('');
+    });
 
-      await sendTelegram(lines.join('\n'));
-      state.lastRepostId = videoId;
-      saveState(state);
-    } else {
-      console.log(`[${timestamp}] No new repost for @${USERNAME}.`);
-    }
-  } catch (err) {
-    console.error(`[${timestamp}] Error:`, err.message);
+    await notify(lines.join('\n'));
+    state.lastId = fresh[0].id;
+    saveState(state);
+  } catch (e) {
+    console.error(`[${ts}]`, e.message);
   }
 }
 

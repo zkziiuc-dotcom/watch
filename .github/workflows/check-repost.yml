@@ -1,14 +1,12 @@
-name: TikTok Repost Watcher (Free)
+name: run
 
 on:
   schedule:
-    # Every 15 minutes — repo is public so GitHub Actions minutes are unlimited.
-    # Change to '*/30 * * * *' if you switch to a private repo later.
     - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       username_override:
-        description: 'Optional: check a different username for this one manual run only'
+        description: 'target'
         required: false
 
 permissions:
@@ -18,52 +16,43 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install Xvfb (virtual display for headed browser)
+      - name: xvfb
         run: sudo apt-get install -y xvfb
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          key: ${{ runner.os }}-pw-${{ hashFiles('package-lock.json') }}
 
-      - name: Install dependencies
-        run: npm install
+      - run: npm install
 
-      - name: Install Playwright Chromium + system deps
-        run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium
 
-      - name: Restore login session from secret
-        run: echo "${{ secrets.AUTH_STATE_B64 }}" | base64 -d > auth-state.json
+      - run: echo "${{ secrets.AUTH_STATE_B64 }}" | base64 -d > auth-state.json
 
-      - name: Run repost check
-        env:
-          TIKTOK_USERNAME: ${{ github.event.inputs.username_override || secrets.TIKTOK_USERNAME }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DISPLAY: ':99'
-        run: |
+      - run: |
           Xvfb :99 -screen 0 1280x800x24 &
           sleep 1
           node check-repost.js
+        env:
+          TARGET: ${{ github.event.inputs.username_override || secrets.TIKTOK_USERNAME }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISPLAY: ':99'
 
-      - name: Commit updated state (if changed)
-        run: |
-          git config user.name "repost-watcher-bot"
-          git config user.email "actions@users.noreply.github.com"
+      - run: |
+          git config user.name "bot"
+          git config user.email "bot@bot"
           git add state.json
-          git diff --staged --quiet || git commit -m "Update repost state [skip ci]"
+          git diff --staged --quiet || git commit -m "s [skip ci]"
           git push
 
-      - name: Clean up session file
+      - run: rm -f auth-state.json
         if: always()
-        run: rm -f auth-state.json
 
