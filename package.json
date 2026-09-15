@@ -1,0 +1,16 @@
+{
+  "name": "tiktok-repost-watcher-free",
+  "version": "1.0.0",
+  "description": "Fully free TikTok repost watcher using a headless browser and a dummy account's saved login session instead of a paid scraping service.",
+  "scripts": {
+    "login": "node login-once.js",
+    "check": "node check-repost.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.47.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
