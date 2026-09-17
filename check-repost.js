@@ -15,8 +15,8 @@ const AUTH_STATE_FILE    = path.join(__dirname, 'auth-state.json');
 
 if (!USERNAME) { console.error('Set TARGET env var or pass username as argument.'); process.exit(1); }
 
-function loadState()      { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return { lastId: null }; } }
-function saveState(s)     { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); }
+function loadState()  { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return { lastId: null }; } }
+function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); }
 
 async function notify(msg) {
   await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -68,7 +68,7 @@ async function main() {
     if (items.length === 0) { console.log(`[${ts}] nothing found`); return; }
 
     if (DRY_RUN) {
-      console.log(`[${ts}] dry-run � ${items.length} item(s):`);
+      console.log(`[${ts}] dry-run: ${items.length} item(s):`);
       items.forEach((r, i) => console.log(`  ${i + 1}. @${r.creator}  ${r.url}`));
       return;
     }
@@ -85,13 +85,13 @@ async function main() {
     const fresh    = knownIdx === -1 ? [items[0]] : items.slice(0, knownIdx);
     if (fresh.length === 0) { console.log(`[${ts}] no change`); return; }
 
-    console.log(`[${ts}] ${fresh.length} new item(s)`);
+    console.log(`[${ts}] ${fresh.length} new repost(s)`);
     const n = fresh.length;
-    const lines = [`<b>@${USERNAME}</b> reposted ${n} video${n > 1 ? 's' : ''}! ??`, ''];
+    const lines = ['🔁 <b>@' + USERNAME + '</b> reposted ' + n + ' video' + (n > 1 ? 's' : '') + '!', ''];
     fresh.forEach((r, i) => {
-      if (n > 1) lines.push(`<b>${i + 1}.</b>`);
-      lines.push(`?? <b>@${r.creator}</b>`);
-      lines.push(`?? ${r.url}`);
+      if (n > 1) lines.push('<b>' + (i + 1) + '.</b>');
+      lines.push('👤 <b>@' + r.creator + '</b>');
+      lines.push('🔗 ' + r.url);
       if (i < fresh.length - 1) lines.push('');
     });
 
@@ -100,6 +100,7 @@ async function main() {
     saveState(state);
   } catch (e) {
     console.error(`[${ts}]`, e.message);
+    process.exit(1);
   }
 }
 

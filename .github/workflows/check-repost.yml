@@ -47,11 +47,14 @@ jobs:
           sleep 3
           node check-repost.js
 
-      - run: |
+      - name: save state
+        run: |
           git config user.name "bot"
           git config user.email "bot@bot"
           git add state.json
-          git diff --staged --quiet || (git commit -m "s [skip ci]" && git pull --rebase origin main && git push)
+          git diff --staged --quiet || git commit -m "s [skip ci]"
+          git push --force origin main
+        if: always()
 
       - run: rm -f auth-state.json
         if: always()
