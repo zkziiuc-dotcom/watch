@@ -1,0 +1,60 @@
+name: run
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      username_override:
+        description: 'target'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      TARGET: ${{ github.event.inputs.username_override || secrets.TIKTOK_USERNAME }}
+      TIKTOK_USERNAME: ${{ github.event.inputs.username_override || secrets.TIKTOK_USERNAME }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      DISPLAY: ':99'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: xvfb
+        run: sudo apt-get install -y xvfb
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-pw-${{ hashFiles('package-lock.json') }}
+
+      - run: npm install
+
+      - run: npx playwright install --with-deps chromium
+
+      - run: echo "${{ secrets.AUTH_STATE_B64 }}" | base64 -d > auth-state.json
+
+      - run: |
+          Xvfb :99 -screen 0 1280x800x24 &
+          sleep 3
+          node check-repost.js
+
+      - name: save state
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@bot"
+          git add state.json
+          git diff --staged --quiet || git commit -m "s [skip ci]"
+          git push --force origin main
+        if: always()
+
+      - run: rm -f auth-state.json
+        if: always()
